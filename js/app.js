@@ -6,7 +6,7 @@
   'use strict';
   var COMPACT_AT = .04, DRIFT_TAU = .32, DRIFT = [8, 5], GRAIN_FPS = 6, PHONE = 700;
   var SEQ_DPR = 1.5, SEQ_TAU = .07, CONCURRENCY = 4, BLEND_STEPS = 16;
-  var SETS = { p: { dir: 'seq', n: 108 }, l: { dir: 'seq-l', n: 108 } };
+  var SETS = { p: { dirs: ['seq'], n: 108 }, l: { dirs: ['seq-l', 'seq-1', 'seq'], n: 108 } };   // fallbacks: tolerate seq-1 (digit) or a missing landscape set
   var NAMES = ['chambers', 'court', 'brief'];
   var FOCUS_Y = { p: [.5, .5, .5], l: [.3, .5, .5] };   // vertical crop focus per scene (cover-fit)
   var clamp = function (n, a, b) { return Math.min(b === undefined ? 1 : b, Math.max(a === undefined ? 0 : a, n)); };
@@ -20,7 +20,7 @@
   function sequence(scene, name, set, fy, dirty) {
     var cv = document.createElement('canvas'); cv.className = 'seq-canvas'; cv.setAttribute('aria-hidden', 'true');
     scene.appendChild(cv);
-    var ctx = cv.getContext('2d', { alpha: false }), n = SETS[set].n, dir = SETS[set].dir;
+    var ctx = cv.getContext('2d', { alpha: false }), n = SETS[set].n, dirs = SETS[set].dirs, di = 0, loaded = 0;
     var frames = new Array(n), key = '', cw = 1, ch = 1, started = false, qi = 0, active = 0, order = [], seen = {}, i;
     function size() {
       var r = scene.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, SEQ_DPR);
@@ -45,10 +45,16 @@
     function pump() {
       while (active < CONCURRENCY && qi < order.length) {
         (function (idx) {
-          active++; var im = new Image(); im.decoding = 'async';
-          im.onload = function () { frames[idx] = im; active--; key = ''; dirty(); pump(); };
-          im.onerror = function () { active--; pump(); };
-          im.src = 'assets/' + dir + '/' + name + '/' + ('00' + (idx + 1)).slice(-3) + '.webp';
+          active++; var im = new Image(), used = di; im.decoding = 'async';
+          im.onload = function () { frames[idx] = im; loaded++; active--; key = ''; dirty(); pump(); };
+          im.onerror = function () {
+            active--;
+            if (!loaded && used === di && di < dirs.length - 1) { di++; }       // folder name not found: try the next one
+            if (!loaded && di > used) order.push(idx);                          // retry this frame with the new folder
+            else if (!loaded && used < di) order.push(idx);
+            pump();
+          };
+          im.src = 'assets/' + dirs[di] + '/' + name + '/' + ('00' + (idx + 1)).slice(-3) + '.webp';
         })(order[qi++]);
       }
     }
